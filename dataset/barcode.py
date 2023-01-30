@@ -1,5 +1,6 @@
 import random
 
+import cv2
 import torch
 import numpy as np
 from torch.utils.data import Dataset
@@ -285,6 +286,120 @@ class BCDatasetValid(Dataset):
                             self.barcode_boxes.append(data_i)
 
         return {'polygons': polygons, 'classes': np.array(labels)}
+
+    def collate_fn(self, data):
+        imgs_list, polygon_list = zip(*data)
+
+        batch_size = len(imgs_list)
+        pad_imgs_list = []
+        pad_mask_list = []
+
+        h_list = [int(s.shape[1]) for s in imgs_list]
+        w_list = [int(s.shape[2]) for s in imgs_list]
+        max_h = 512
+        max_w = 512
+
+        for i in range(batch_size):
+            img = imgs_list[i]
+
+            pad_imgs_list.append(transforms.Normalize(self.mean, self.std, inplace=True)(
+                torch.nn.functional.pad(img, (0, int(max_w - img.shape[2]), 0, int(max_h - img.shape[1])), value=0.)))
+
+        batch_imgs = torch.stack(pad_imgs_list)
+
+        return batch_imgs, polygon_list
+
+
+
+class BCDatasetValidSyntetic(Dataset):
+    def __init__(self, root='/media/artem/A2F4DEB0F4DE85C7/myData/datasets/barcodes/ZVZ-synth-512/', resize_size=(512, 512), mode='train',
+                 mean=(0.40789654, 0.44719302, 0.47026115), std=(0.28863828, 0.27408164, 0.27809835), classes_name=None):
+
+        self.CLASSES_NAME = classes_name
+
+        self.class_idx = 0
+        self.labels_dict = {}
+        self.root = root
+        self.transform = TransformValid('pascal_voc')
+
+        if mode == "train":
+            self.split_path = root + "split/full/dataset_train.csv"
+        elif mode == "valid":
+            self.split_path = root + "split/full/dataset_valid.csv"
+        else:
+            self.split_path = root + "split/full/dataset_valid.csv"
+
+        self.base_path = root
+        self.samples = pd.read_csv(self.split_path)
+        self.mode = mode
+
+        self.resize_size = resize_size
+        self.mean = mean
+        self.std = std
+        self.down_stride = 4
+
+        self.category2id = {k: v for v, k in enumerate(self.CLASSES_NAME)}
+        self.id2category = {v: k for k, v in self.category2id.items()}
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        sample = self.samples.loc[idx]
+
+        ipath = os.path.join(self.base_path, sample.image.replace("\\", "/"))  # self.base_path + sample.image
+
+        self.ipath = ipath
+        try:
+            img = Image.open(ipath).convert('RGB')
+        except:
+            return self.__getitem__(random.choice(range(len(self.samples))))
+
+        width, height = img.size[0], img.size[1]
+
+        xpath = os.path.join(self.base_path, sample.objects.replace("\\", "/"))
+        label = self.parse_synth_annotation(xpath)
+        img = np.array(img)
+        img = img.astype(np.uint8())
+
+        raw_h, raw_w, _ = img.shape
+        polygons = label['polygons']
+
+        mask = Image.new('L', (width, height), 0)
+
+        for polygon in polygons:
+            ImageDraw.Draw(mask).polygon(polygon, outline=0, fill=1)
+        # cv2.imshow("aaa", np.array(mask) / 1.)
+        # cv2.waitKey(0)
+        # cv2.imshow("ddd", np.array(img) / 255)
+        # cv2.waitKey(0)
+
+        img = transforms.ToTensor()(img)
+
+        return img, polygons
+
+    def parse_synth_annotation(self, annotation_path):
+        xml_data = open(annotation_path, 'r').read()  # Read file
+        root = ET.XML(xml_data)  # Parse XML
+        boxes = []
+        labels = []
+        difficulties = list()
+
+        for Pages in root:
+            for Page in Pages:
+                points = []
+                for point in Page:
+                    attr_p = point.attrib
+                    x = float(attr_p['X'])
+                    y = float(attr_p['Y'])
+                    points.append((int(x), int(y)))
+
+            data_i = points
+            labels.append(1)
+            difficulties.append('1')
+            boxes.append(data_i)
+
+        return {'polygons': boxes, 'labels': np.array(labels)}
 
     def collate_fn(self, data):
         imgs_list, polygon_list = zip(*data)
