@@ -52,8 +52,22 @@ class Head(nn.Module):
         return nn.Sequential(feat_conv, relu, out_conv)
 
     def forward(self, x):
+        st_time = time.time()
         hm = self.cls_head(x).sigmoid()
-        return hm
+        wh = self.wh_head(x).relu()
+        offset = self.reg_head(x)
+        #print("base", time.time() - st_time)
+        num_rect = self.rect_head(x)
+        noise_key = self.noise_head(x)
+        small_lines_key = self.small_lines_head(x)
+        shift_key = self.shift_head(x)
+        big_lines_key = self.big_lines_head(x)
+        #print("mode", time.time() - st_time)
+        #print("_______________")
+        features = torch.cat((num_rect, noise_key, small_lines_key, shift_key, big_lines_key), axis=1)
+
+        return hm, wh, offset, features.detach()
+
 
 class HeadJointPoints(nn.Module):
     def __init__(self, num_classes=80, channel=64):

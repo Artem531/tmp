@@ -43,7 +43,7 @@ def calcLossAdaptationCoef( listOfLossComponentsChangeRates, max_norm_loss ):
     listOfLossAdaptationCoef = []
 
     # Nominator
-    beta = 100
+    beta = 1
     a = np.exp(beta * (listOfLossComponentsChangeRates - max_norm_loss))
 
     # denominator
@@ -52,7 +52,6 @@ def calcLossAdaptationCoef( listOfLossComponentsChangeRates, max_norm_loss ):
     # params
     params = a / (total + 1e-8)
     return params
-
 
 class Trainer(object):
     def __init__(self, config, model, centerNetModelHead, loss_func, centerNetLoss_func, train_loader, val_loader=None):
@@ -103,7 +102,7 @@ class Trainer(object):
         self.start_adapt_iter = 51
         self.n = 50
         self.loss_iters = 0
-
+        self.adaptOffFlag = not cfg.adaptOffFlag
         self.prev_loss_components = []
 
     def init_logger(self):
@@ -159,7 +158,8 @@ class Trainer(object):
 
         pred = self.centerNetHead(UnetMapsFeatures)
         losses = self.centerNetLosser(pred, gt)
-        return losses
+        #print("losses", losses)
+        return sum(losses)
 
     def train_one_epoch(self):
         self.train_net.train()
@@ -173,45 +173,12 @@ class Trainer(object):
 
             self.optimizer.zero_grad()
             pred, pred_prev = self.train_net(imgs)
+            UnetLoss = self.losser(y_true=ann.long(), y_pred=pred)
 
-            #gtCenterNetHead = train_ds_CN.collate_fn([train_ds_CN.__getitem__(idx) for idx in sample_indexes ])
-            #centerNetLoss, centerNetF1Loss = self.getCenterNetLoss(gtCenterNetHead, pred_prev)
-
-            #UnetLoss = self.losser(y_true=ann.long(), y_pred=pred)
-
-            binary_ann = torch.zeros_like(pred)
-            for c in range(pred.shape[1]):
-                binary_ann[:, c, :, :] = torch.where(ann == c, 1, 0)
-                #cv2.imshow("test", (ann.cpu().numpy()[0] == c) * 1.)
-                #cv2.waitKey(0)
-
-            binary_pred = pred.sigmoid()
-            #print(binary_ann.shape, binary_pred.shape)
-
-            tp = binary_ann * binary_pred
-
-            fp = binary_pred * (1 - binary_ann)
-            fn = binary_ann * (1 - binary_pred)
-            tn = (1 - binary_ann) * (1 - binary_pred)
-
-            #soft_f1_class1 =  tp / (tp + (fp + fn) / 2 + 1e-8)
-            #soft_f1_class0 = tn / (tn + (fp + fn) / 2 + 1e-8)
-
-            b = self.config.f1Beta
-
-            soft_f1_class1 = tp / (tp + (b**2 * fp + fn) / (b**2 + 1) + 1e-8)
-            soft_f1_class0 = tn / (tn + (b**2 * fp + fn) / (b**2 + 1) + 1e-8)
-
-
-            cost_class1 = 1 - soft_f1_class1
-            cost_class0 = 1 - soft_f1_class0
-
-            #print(tp.item(), fp.item(), fn.item())
-            #unetF1Score = torch.sum((cost_class0 + cost_class1) / 2)
-            #unetF1Score = torch.sum(cost_class1)
-
-            loss_components = [torch.sum(cost_class0), torch.sum(cost_class1)]
-            if self.loss_iters > self.start_adapt_iter:
+            #loss_components = [(unetF1Score0 + unetF1Score1) / 2]
+            loss_components = [UnetLoss]
+            #print(UnetLoss, centerNetLoss)
+            if self.loss_iters > self.start_adapt_iter and self.adaptOffFlag:
                 rate = calcRateOfChange(np.mean(self.prev_loss_components, axis=0), np.array([loss_i.item() for loss_i in loss_components]))
                 norm_rate, max_rate = calLossRateNormalization(rate)
                 params = calcLossAdaptationCoef(norm_rate, max_rate)
@@ -220,14 +187,14 @@ class Trainer(object):
                 print(params)
                 print(loss_components)
                 print(norm_rate)
-                loss = loss_components[0] * params[0] + loss_components[1] * params[1]
+                loss = loss_components[0]
             else:
                 #print(unetF1Score.item(), centerNetF1Loss.item(), centerNetLoss.item(), UnetLoss.item())
                 #loss = (UnetLoss - unetF1Score + centerNetLoss - centerNetF1Loss) / 4
                 #print(unetF1Score.item(), UnetLoss.item())
-                loss = (torch.sum(cost_class0) + torch.sum(cost_class1)) / 2
+                loss = loss_components[0]
 
-            self.prev_loss_components.append( np.array([loss_i.item() for loss_i in loss_components] ) )
+            self.prev_loss_components.append( np.array( [loss_i.item() for loss_i in loss_components] ) )
             if len(self.prev_loss_components) > self.n:
                 self.prev_loss_components.pop(0)
             self.loss_iters += 1

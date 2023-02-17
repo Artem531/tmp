@@ -54,6 +54,7 @@ class BCDataset(Dataset):
         try:
             img = Image.open(ipath).convert('RGB')
         except:
+            print(ipath)
             return self.__getitem__(random.choice(range(len(self.samples))))
 
         width, height = img.size[0], img.size[1]
@@ -140,7 +141,7 @@ class BCDataset(Dataset):
                             polygons.append(data_i)
                             self.barcode_boxes.append(data_i)
 
-        return {'polygons': polygons, 'classes': np.array(labels)}
+        return {'polygons': polygons, 'classes': labels}
 
     def collate_fn(self, data):
         imgs_list, mask_list, idx = zip(*data)
@@ -169,6 +170,101 @@ class BCDataset(Dataset):
 
         return batch_imgs, batch_mask, idx
 
+
+class BCDatasetPatterns(BCDataset):
+    def __init__(self, root='/home/artem/PycharmProjects/CenterNetRefs/ZVZ-real-512/', resize_size=(512, 512), mode='train',
+                 mean=(0.40789654, 0.44719302, 0.47026115), std=(0.28863828, 0.27408164, 0.27809835), classes_name=None, patterns_csv_path=None):
+
+        super(BCDatasetPatterns, self).__init__(root, resize_size, mode, mean, std, classes_name)
+
+        self.csv = pd.read_csv(patterns_csv_path)
+        names = []
+        for name in self.csv["filename"]:
+            names.append(name.split(".")[0])
+
+        self.csv["filename"] = names
+
+    def get_patterns(self, image_name):
+        polygons = []
+        classes = []
+
+        sample_with_images = self.csv[self.csv["filename"] == image_name.split(".")[0]]
+        for polygon_data in zip(sample_with_images["region_shape_attributes"], sample_with_images["region_attributes"]):
+            polygon_data, polygon_class = polygon_data
+
+            if polygon_class == "{}":
+                continue
+
+            label = self.category2id[polygon_class]
+            classes.append(label)
+
+            try:
+                _, polygon_data = polygon_data.split("all_points_x")
+
+                polygon_data_x, polygon_data_y = polygon_data.split("all_points_y")
+
+                polygon_data_x = polygon_data_x[3:-3]
+                polygon_data_y = polygon_data_y[3:-2]
+
+                polygon_data_x = [int(x) for x in polygon_data_x.split(",")]
+                polygon_data_y = [int(x) for x in polygon_data_y.split(",")]
+
+                polygons.append([(x, y) for x, y in zip(polygon_data_x, polygon_data_y)])
+            except:
+                continue
+
+        return polygons, classes
+
+    def __getitem__(self, idx):
+        sample = self.samples.loc[idx]
+
+        ipath = os.path.join(self.base_path, sample.image.replace("\\", "/"))  # self.base_path + sample.image
+
+        self.ipath = ipath
+        try:
+            img = Image.open(ipath).convert('RGB')
+        except Exception as e:
+            print(e, ipath)
+            return self.__getitem__(random.choice(range(len(self.samples))))
+
+        width, height = img.size[0], img.size[1]
+
+        xpath = os.path.join(self.base_path, sample.objects.replace("\\", "/"))
+        label = self.parse_annotation(xpath)
+        img = np.array(img)
+        img = img.astype(np.uint8())
+
+        raw_h, raw_w, _ = img.shape
+
+        barcode_polygons = label['polygons']
+        barcode_classes = label['classes']
+
+        image_name = ipath.split("/")[-1]
+        patterns_polygons, patterns_classes = self.get_patterns(image_name)
+
+        if len(barcode_polygons) != 0:
+            polygons = barcode_polygons + patterns_polygons
+            classes = barcode_classes + patterns_classes
+        else:
+            polygons = barcode_polygons
+            classes = barcode_classes
+
+        classes = np.array(classes)
+
+        full_mask = np.zeros((len(self.category2id), height, width))
+        for polygon, class_label in zip(polygons, classes):
+            mask = Image.new('L', (width, height), 0)
+            ImageDraw.Draw(mask).polygon(polygon, outline=0, fill=1)
+            full_mask[class_label] += mask
+
+        mask = np.array(full_mask)
+        #w, h = self.resize_size
+        #mask = cv2.resize(mask, (w, h))
+
+        AnnMap = torch.unsqueeze(torch.Tensor(mask), dim=0)
+        img = transforms.ToTensor()(img)
+
+        return img, AnnMap, idx
 
 class BCDatasetValid(Dataset):
     def __init__(self, root='/home/artem/PycharmProjects/CenterNetRefs/ZVZ-real-512/', resize_size=(512, 512), mode='train',

@@ -106,7 +106,7 @@ for data in tqdm.tqdm(dl):
 
 
 for network_id in range(10):
-    path = f"/home/artem/PycharmProjects/backboned-unet-new/ckp/f5+resnetInitFalse+v2+30/{str(network_id)}.pth"
+    path = f"/home/artem/PycharmProjects/backboned-unet-new/ckp/testNewFeatures/{str(network_id)}.pth"
     print(path)
     ckp = torch.load(path)
     plot_data = []
@@ -129,7 +129,7 @@ for network_id in range(10):
             numpy_masks = np.concatenate((numpy_masks, pred_map.detach().cpu().numpy()), axis=0)
 
 
-    for th in list(np.linspace(0., 0.3, 200)) + list(np.linspace(0.3, 0.99, 50)):
+    for th in list(np.linspace(0.00, 0.3, 300)) + list(np.linspace(0.3, 0.99, 50)):
         converter.detection_pixel_threshold = th
         detected_objects = converter.postprocess_target_map(1 - numpy_masks)
 
@@ -151,23 +151,32 @@ for network_id in range(10):
         prec = 0
         rec = 0
 
+        tp = 0  # true positives
+        fp = 0  # false positives
+        fn = 0  # false negatives
+
         for refBoxes, predBoxes in zip(allRefBoxes, allBarcodesBoxes):
             if len(predBoxes) == 0:
                 prec += 1
                 rec += 0
-                continue
 
+                fn += refBoxes.shape[1]  # false negatives
+                continue
+            print(refBoxes[0], predBoxes)
             calc = FtMetricsCalculator(refBoxes[0], predBoxes)
             metrics = calc.analyze(0.5)
 
             prec += metrics.average_precision_by_area
             rec += metrics.average_recall_by_area
 
+            tp += metrics.tp   # true positives
+            fp += metrics.fp   # false positives
+            fn += metrics.fn   # false negatives
 
         b = fbeta
         prec = prec / len(allRefBoxes)
         rec = rec / len(allRefBoxes)
-        plot_data.append([prec, rec])
+        plot_data.append([prec, rec, tp, fp, fn, th])
 
         print(prec, rec, th)
     print(plot_data)

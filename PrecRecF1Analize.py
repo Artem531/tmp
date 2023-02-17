@@ -1,5 +1,7 @@
+import cv2
 import numpy as np
 from shapely.geometry import Polygon
+import torch
 
 def calcIoU(refBox, predBox):
     polygon1 = Polygon(refBox)
@@ -9,6 +11,21 @@ def calcIoU(refBox, predBox):
     iou = intersect / union
 
     return iou
+
+def getTpFpFnMasks(binary_ann, binary_pred):
+    """
+    ref and pred boxes for 1 class
+    """
+    #cv2.imshow("1", binary_pred * 1.)
+    #cv2.imshow("2", binary_ann * 1.)
+    #cv2.waitKey(0)
+
+    tp = np.sum(binary_ann * binary_pred)
+
+    fp = np.sum(binary_pred * (1 - binary_ann))
+    fn = np.sum(binary_ann * (1 - binary_pred))
+
+    return tp, fp, fn
 
 def getTpFpFn(refBoxes, predBoxes, iou_th=0.5):
     """

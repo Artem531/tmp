@@ -1,4 +1,4 @@
-from dataset.barcode import BCDataset
+from dataset.barcode import BCDataset, BCDatasetPatterns
 from backboned_unet.config import Config as cfg
 from torch.utils.data import DataLoader
 from backboned_unet import Unet
@@ -12,13 +12,15 @@ import os
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 if __name__ == "__main__":
-    for i in range(0, 10):
-        train_ds = BCDataset(cfg.root, mode='train', resize_size=cfg.resize_size, classes_name=cfg.CLASSES_NAME)
+    for i in range(0, 5):
+        train_ds = BCDatasetPatterns(cfg.root, mode='train', resize_size=cfg.resize_size, classes_name=cfg.CLASSES_NAME,
+                                     patterns_csv_path=cfg.patterns_markup)
 
         train_dl = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True,
                               num_workers=cfg.num_workers, collate_fn=train_ds.collate_fn, pin_memory=True)
 
-        eval_ds = BCDataset(cfg.root, mode="valid", resize_size=cfg.resize_size, classes_name=cfg.CLASSES_NAME)
+        eval_ds = BCDatasetPatterns(cfg.root, mode="valid", resize_size=cfg.resize_size, classes_name=cfg.CLASSES_NAME,
+                                    patterns_csv_path=cfg.patterns_markup)
 
         eval_dl = DataLoader(eval_ds, batch_size=1, shuffle=True,
                               num_workers=cfg.num_workers, collate_fn=train_ds.collate_fn, pin_memory=True)
@@ -31,7 +33,7 @@ if __name__ == "__main__":
             print("use new params")
 
         if cfg.init:
-            ckp = torch.load(cfg.init_checkpoint_dir)
+            ckp = torch.load(cfg.init_checkpoint_dir + f"{i}.pth")
 
             model_static_dict = ckp['model']
             model_static_dict["final_conv.weight"] = net.state_dict()["final_conv.weight"]
@@ -45,9 +47,9 @@ if __name__ == "__main__":
             centerNetHead = centerNetHead.cuda()
 
         loss_func = cfg.loss_f
-        CN_loss_func = Loss()
+        CN_loss_func = Loss(cfg)
 
-        epoch = 30
+        epoch = 100
         cfg.max_iter = len(train_dl) * epoch
         cfg.steps = (int(cfg.max_iter * 0.6), int(cfg.max_iter * 0.8))
 

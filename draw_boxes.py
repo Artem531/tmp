@@ -2,7 +2,7 @@ from convert.converter import Converter
 from convert.data.data_info import TargetMapInfo
 
 import cv2
-from dataset.barcode import BCDataset
+from dataset.barcode import BCDataset, BCDatasetValidSyntetic
 from torch.utils.data import DataLoader
 from backboned_unet import Unet
 import torch
@@ -14,7 +14,7 @@ from torchvision import transforms
 from catalyst.utils.config import _load_ordered_yaml as load_ordered_yaml
 from convert.utils import process_class_config
 
-path = "ckp/f1+centerf1+v1+30/2.pth"
+path = "/media/artem/A2F4DEB0F4DE85C7/runs/presentation/original+200/0.pth"
 ckp = torch.load(path)
 cfg = ckp['config']
 
@@ -26,8 +26,21 @@ model = model.eval()
 if cfg.gpu:
     model = model.cuda()
 
+path = "/media/artem/A2F4DEB0F4DE85C7/runs/presentation/f1+100+v1+pretrainCenterNet/0.pth"
+ckp = torch.load(path)
+cfg = ckp['config']
+
+model_second = Unet(backbone_name=cfg.slug, classes=cfg.num_classes)
+
+model_second.load_state_dict(ckp['model'])
+model_second = model_second.eval()
+
+if cfg.gpu:
+    model_second = model_second.cuda()
+
 mode = "eval"
-ds = BCDataset('/media/artem/A2F4DEB0F4DE85C7/myData/datasets/barcodes/ZVZ-real-512_orig/', resize_size=(512, 512), mode=mode, classes_name=cfg.CLASSES_NAME)
+ds = BCDatasetValidSyntetic('/media/artem/A2F4DEB0F4DE85C7/myData/datasets/barcodes/ZVZ-synth-512/', resize_size=(512, 512),
+                    mode=mode, classes_name=cfg.CLASSES_NAME)
 dl = DataLoader(ds, batch_size=1, collate_fn=ds.collate_fn)
 
 plot_data = []
@@ -39,14 +52,15 @@ with open(class_config_path, "r") as fin:
 # set default values
 class_config = process_class_config(class_config["class_config"])
 target_map_info = TargetMapInfo(class_config)
-converter = Converter(TargetMapInfo())
 
-def show_img(img, boxes, clses, scores):
+def show_img(img, boxes, clses, scores, name):
     boxes = np.array(boxes, np.int32)
+    print(boxes)
+    print("_______________")
     for box in boxes:
         img = cv2.polylines(img, [box], True, (255, 0, 0), 2)
 
-    cv2.imshow("ref", img)
+    cv2.imshow("ref_" + name, img)
     cv2.waitKey(0)
 
 def preprocess_img(img, input_ksize):
@@ -69,26 +83,14 @@ def preprocess_img(img, input_ksize):
 
     return img_paded, {'raw_height': h, 'raw_width': w}
 
-for data in tqdm.tqdm(dl):
-    img, ann, _ = data
-    ipath = ds.ipath
-
-    img = Image.open(ipath).convert('RGB')
-    img_paded, info = preprocess_img(img, cfg.resize_size)
-
-    imgs = [img]
-    infos = [info]
-
-    input = transforms.ToTensor()(img_paded)
-    input = transforms.Normalize(std=cfg.std, mean=cfg.mean)(input)
-    inputs = input.unsqueeze(0).cuda()
-
-    masks, _ = model(inputs)
+def processModel(model1, inputs, detection_pixel_threshold, img_paded, name):
+    masks, _ = model1(inputs)
     pred_map = torch.sigmoid(masks)
 
     numpy_masks = pred_map.detach().cpu().numpy()
 
-    #converter.detection_pixel_threshold = 0.45
+    converter = Converter(TargetMapInfo())
+    converter.detection_pixel_threshold = detection_pixel_threshold
     detected_objects = converter.postprocess_target_map(1 - numpy_masks)
     print(np.max(1 - numpy_masks))
     print(detected_objects)
@@ -104,11 +106,29 @@ for data in tqdm.tqdm(dl):
         cls.append(obj.class_name)
         score.append(1)
 
-    show_img( img_paded, barcodesBoxes, cls, score )
-    for i, mask in enumerate(pred_map[0]):
-        cv2.imshow(cfg.CLASSES_NAME[i], mask.detach().cpu().numpy() * 1.)
+    show_img( img_paded, barcodesBoxes, cls, score, name )
+    #for i, mask in enumerate(pred_map[0]):
+    #    cv2.imshow(cfg.CLASSES_NAME[i] + "_" + name, mask.detach().cpu().numpy() * 1.)
 
-    ann = ann[0].detach().cpu().numpy() > 0
-    ann = ann / 1.
-    cv2.imshow("ann", ann)
+
+
+for data in tqdm.tqdm(dl):
+    img, _ = data
+    ipath = ds.ipath
+
+    img = Image.open(ipath).convert('RGB')
+    img_paded, info = preprocess_img(img, cfg.resize_size)
+
+    imgs = [img]
+    infos = [info]
+
+    input = transforms.ToTensor()(img_paded)
+    input = transforms.Normalize(std=cfg.std, mean=cfg.mean)(input)
+    inputs = input.unsqueeze(0).cuda()
+
+    processModel(model_second, inputs, 0.000813850038109756, img_paded.copy(), "Dice")
+    processModel(model, inputs, 0.13827078683035715, img_paded.copy(), "original+200")
+
+
+
     cv2.waitKey()

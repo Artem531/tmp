@@ -87,19 +87,23 @@ def plot_data(name, display_name):
 # display_name = "f1 версия 1"
 # plot_data(name, display_name)
 #
-# name = "Original+200+syntetic"
-# display_name = "Original syntetic"
-# plot_data(name, display_name)
-#
+name = "Original+200+syntetic+iou"
+display_name = "Original syntetic"
+plot_data(name, display_name)
+
+name = "original+200+syntetic+iou+ivan"
+display_name = "original+200+syntetic+iou+ivan"
+plot_data(name, display_name)
+
 # name = "resnetCenterNetUnet+100+syntetic"
 # display_name = "resnetCenterNetUnet syntetic"
 # plot_data(name, display_name)
 
 #
-# name = "testNewFeatures+100+syntetic"
+# name = "testNewFeatures+100+syntetic+iou"
 # display_name = "testNewFeatures+100+syntetic"
 # plot_data(name, display_name)
-#
+
 # name = "resnetCenterNetUnet+100+syntetic"
 # display_name = "resnetCenterNetUnet"
 # plot_data(name, display_name)

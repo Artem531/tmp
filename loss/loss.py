@@ -6,6 +6,39 @@ import numpy as np
 from backboned_unet.config import Config as cfg
 import queue
 
+
+def calLossRateNormalization( listOfLossComponentsRates ):
+    """
+    listOfLossComponentsRates : numpy
+    """
+    totalLossRate = np.sum(listOfLossComponentsRates)
+
+    ns = listOfLossComponentsRates / (totalLossRate + 1e-8)
+    max_norm_loss = np.max(ns)
+
+    return ns, max_norm_loss
+
+def calcRateOfChange(curLossComponents, prevLossComponents):
+    print("loss curLossComponents", curLossComponents)
+    print("loss prevLossComponents", prevLossComponents)
+    rate = curLossComponents / prevLossComponents
+    return rate#, np.max(rate)
+
+def calcLossAdaptationCoef( listOfLossComponentsChangeRates, max_norm_loss ):
+    listOfLossAdaptationCoef = []
+
+    # Nominator
+    beta = 10
+    a = np.exp(beta * (listOfLossComponentsChangeRates - max_norm_loss))
+
+    # denominator
+    total = np.sum(a)
+
+    # params
+    params = a / (total + 1e-8)
+    return params
+
+
 class CenterLoss(nn.Module):
     """Center loss.
 
@@ -50,7 +83,7 @@ class CenterLoss(nn.Module):
         return loss
 
 class Loss(nn.Module):
-    def __init__(self):
+    def __init__(self, cfg):
         super(Loss, self).__init__()
         self.down_stride = cfg.down_stride
 
@@ -64,29 +97,95 @@ class Loss(nn.Module):
         self.gamma = cfg.loss_gamma
 
 
+        self.start_adapt_iter = 100000000
+        self.n = 50
+        self.loss_iters = 0
+
+        self.prev_loss_components = []
+
     def forward(self, pred, gt):
-        pred_hm = pred
+        pred_hm, pred_wh, pred_offset, pred_similarity = pred
         imgs, gt_boxes, gt_classes, gt_hm, infos = gt
-        cls_loss = self.focal_loss(pred_hm, gt_hm)
+        gt_nonpad_mask = gt_classes.gt(-0.5)
 
-        binary_pred = pred.sigmoid()
-        # print(binary_ann.shape, binary_pred.shape)
+        #print('pred_hm: ', pred_hm.shape, '  gt_hm: ', gt_hm.shape)
+        cls_loss = self.focal_loss(pred_hm, gt_hm) / pred_hm.shape[2] / pred_hm.shape[3]
 
-        binary_ann = gt_hm
-        tp = binary_ann * binary_pred
+        wh_loss = cls_loss.new_tensor(0.)
+        offset_loss = cls_loss.new_tensor(0.)
+        features_loss = cls_loss.new_tensor(0.)
 
-        fp = binary_pred * (1 - binary_ann)
-        fn = binary_ann * (1 - binary_pred)
-        # tn = (1 - binary_ann) * (1 - binary_pred)
+        num = 0
+        #print(gt_classes, "gt_classes")
 
-        # soft_f1_class1 =  tp / (tp + (fp + fn) / 2 + 1e-8)
-        # soft_f1_class0 = tn / (tn + (fp + fn) / 2 + 1e-8)
+        loss_components = []
+        for batch in range(imgs.size(0)):
+            ct = infos[batch]['ct'].cuda()
+            ct_int = ct.long()
+            num += len(ct_int)
+            batch_pos_pred_wh = pred_wh[batch, :, ct_int[:, 1], ct_int[:, 0]].view(-1)
+            batch_pos_pred_offset = pred_offset[batch, :, ct_int[:, 1], ct_int[:, 0]].view(-1)
 
-        b = cfg.f1Beta
+            batch_boxes = gt_boxes[batch][gt_nonpad_mask[batch]]
+            wh = torch.stack([
+                batch_boxes[:, 2] - batch_boxes[:, 0],
+                batch_boxes[:, 3] - batch_boxes[:, 1]
+            ]).view(-1) / self.down_stride
+            offset = (ct - ct_int.float()).T.contiguous().view(-1)
+            #print(batch_pos_pred_wh.shape, wh.shape)
+            wh_loss += self.l1_loss(batch_pos_pred_wh, wh, reduction='sum')
+            #print(batch_pos_pred_offset.shape, offset.shape)
+            offset_loss += self.l1_loss(batch_pos_pred_offset, offset, reduction='sum')
 
-        soft_f1_class1 = tp / (tp + (b ** 2 * fp + fn) / (b ** 2 + 1) + 1e-8)
-        # soft_f1_class0 = tn / (tn + (b**2 * fp + fn) / (b**2 + 1) + 1e-8)
+            #batch_x = x[batch, :, ct_int[:, 1], ct_int[:, 0]].swapaxes(0, 1)
+            #batch_labels = gt_classes[batch][gt_nonpad_mask[batch]]
 
-        cost_class1 = 1 - soft_f1_class1
+            #center_loss += self.Center_loss(batch_x, batch_labels)
 
-        return cls_loss, torch.sum(cost_class1)
+            batch_features = infos[batch]['features'].cuda()
+            batch_pred_features = pred_similarity[batch]
+
+            # print(batch_features.shape)
+            # features = torch.stack([
+            #     batch_features[:, 2],
+            #     batch_features[:, 3]
+            # ])
+
+            batch_features = batch_features[:, ct_int[:, 1], ct_int[:, 0]].view(-1)
+            batch_pred_features = batch_pred_features[:, ct_int[:, 1], ct_int[:, 0]].view(-1)
+            #print("__________________")
+            for i in range(batch_features.shape[0]):
+                #print(batch_features[i], batch_pred_features[i])
+                features_loss += self.feature_loss(batch_pred_features[i], batch_features[i])
+
+        regr_loss = wh_loss * self.beta + offset_loss * self.gamma
+
+        loss_components.append(cls_loss)
+        loss_components.append(offset_loss)
+        loss_components.append(wh_loss)
+        loss_components.append(features_loss)
+
+        if self.loss_iters > self.start_adapt_iter:
+            rate = calcRateOfChange(np.mean(self.prev_loss_components, axis=0),
+                                    np.array([loss_i.item() for loss_i in loss_components]))
+            norm_rate, max_rate = calLossRateNormalization(rate)
+            params = calcLossAdaptationCoef(norm_rate, max_rate)
+            assert (len(params) == len(loss_components))
+
+            print(params)
+            print(loss_components)
+            print(norm_rate)
+            returnArray = [ loss_components[0] * params[0], loss_components[1] * params[1],
+                            loss_components[2] * params[2], loss_components[3] * params[3] ]
+        else:
+            # print(unetF1Score.item(), centerNetF1Loss.item(), centerNetLoss.item(), UnetLoss.item())
+            # loss = (UnetLoss - unetF1Score + centerNetLoss - centerNetF1Loss) / 4
+            # print(unetF1Score.item(), UnetLoss.item())
+            returnArray = [cls_loss * self.alpha, regr_loss / (num + 1e-6), features_loss / (num + 1e-6)]
+
+        self.prev_loss_components.append(np.array([loss_i.item() for loss_i in loss_components]))
+        if len(self.prev_loss_components) > self.n:
+            self.prev_loss_components.pop(0)
+        self.loss_iters += 1
+        # + center_loss / (num + 1e-6)
+        return returnArray
