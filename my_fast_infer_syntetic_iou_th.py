@@ -110,7 +110,7 @@ def calTpFpFn(work_data):
     #print(th_i)
 
     converter.detection_pixel_threshold = binary_th # фиксируем так как варироваться будет iou
-    detected_objects = converter.postprocess_target_map(1 - numpy_masks)
+    detected_objects = converter.postprocess_target_map(numpy_masks)
     predBoxes = []
 
     for i, detected_objects_i in enumerate(detected_objects):
@@ -150,19 +150,9 @@ def pool_handler(work, plot_data):
 #         0.3752170138888889]
 #
 
-paths = ["/home/artem/PycharmProjects/backboned-unet-new/ckp/f5+100inverse",
-         "/home/artem/PycharmProjects/backboned-unet-new/ckp/f5+100true",
-         f"/media/artem/A2F4DEB0F4DE85C7/runs/presentation/original+200",
-         "/home/artem/PycharmProjects/backboned-unet-new/ckp/focalloss+resnetCenterNet",
-         "/home/artem/PycharmProjects/backboned-unet-new/ckp/focallloss+resnetNewFeatures",
-         "/media/artem/A2F4DEB0F4DE85C7/runs/presentation/f1+100+v1+pretrainCenterNet",
-         "/media/artem/A2F4DEB0F4DE85C7/runs/presentation/original+100",
-         "/media/artem/A2F4DEB0F4DE85C7/runs/presentation/f1+100+pretrainCenterNet",
-         "/home/artem/PycharmProjects/backboned-unet-new/ckp/UnetCenterNet+BarcodeFeaturesTrainingSim-ly",
-         "/home/artem/PycharmProjects/backboned-unet-new/ckp/UnetCenterNet+TrainingSim-ly"]
+paths = ["/home/artem/PycharmProjects/backboned-unet-new/ckp/OrigDataset/PatternsMulticlass+focal"]
 
-
-base_path = "/home/artem/PycharmProjects/backboned-unet-new/plots/binary/"
+base_path = "/home/artem/PycharmProjects/backboned-unet-new/plots/full_dataset/"
 plots_num = 8
 
 def gather_data(path):
@@ -186,7 +176,8 @@ def gather_data(path):
 
     return np.mean(th_arr[(prec > lower_b) & (prec < upper_b)])
 
-base_th_path = "/home/artem/PycharmProjects/backboned-unet-new/plots/binary/"
+base_th_path = "/home/artem/PycharmProjects/backboned-unet-new/plots/full_dataset/"
+
 if __name__ == '__main__':
     for configuration_id in range(len(paths)):
         base_path = paths[configuration_id]
@@ -216,12 +207,12 @@ if __name__ == '__main__':
                 masks, _ = model(inputs.cuda())
                 pred_map = torch.sigmoid(masks)
 
-                numpy_masks = pred_map.detach().cpu().numpy()
+                numpy_masks = np.max(pred_map[:, 1:].detach().cpu().numpy(), axis=1)[np.newaxis]
 
                 for th_i, th in enumerate( np.linspace(0.0, 1, num_th) ):
                     work_data.append([th_i, th, binary_th, Converter(TargetMapInfo()), numpy_masks, refBoxes])
 
-                if num % 500 == 0:
+                if num % 400 == 0:
                     pool_handler(work_data, plot_data)  # instantiating without any argument
                     work_data = []
 

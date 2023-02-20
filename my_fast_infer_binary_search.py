@@ -17,7 +17,7 @@ from backboned_unet.config import Config as cfg
 from PrecRecF1Analize import getTpFpFnMasks
 from multiprocessing import Pool
 from PIL import Image, ImageDraw
-
+import os
 from multiprocessing import get_context
 
 class_config_path = "/home/artem/PycharmProjects/backboned-unet-master/base.yml"
@@ -34,8 +34,9 @@ mode = "eval"
 ds = BCDatasetValidSyntetic('/media/artem/A2F4DEB0F4DE85C7/myData/datasets/barcodes/ZVZ-synth-512/', resize_size=(512, 512),
                     mode=mode, classes_name=cfg.CLASSES_NAME)
 dl = DataLoader(ds, batch_size=1, collate_fn=ds.collate_fn)
-
+#print(len(dl))
 plot_data = []
+
 
 
 def show_img(img, boxes, clses, scores):
@@ -85,6 +86,7 @@ def preprocess_img(image, input_ksize, boxes=None):
 
 num = 0
 
+
 def prepareBoxes(data):
     img, refBoxes = data
     orig_refBoxes = list(refBoxes)[0]
@@ -100,41 +102,16 @@ def prepareBoxes(data):
     inputs = input.unsqueeze(0)
     return inputs.cuda(), orig_refBoxes
 
+
 def calTpFpFn(work_data):
     th_i, th, refMask, predMask = work_data
-    predMask = predMask[0, 0]
-
-    predMask = 1 - predMask
-    #cv2.imshow("0", predMask)
-    #cv2.waitKey(0)
+    # cv2.imshow("0", predMask)
+    # cv2.waitKey(0)
     predMask = predMask > th
 
     tp, fp, fn = getTpFpFnMasks(refMask, predMask)
-    #print(tp, fp, fn, len(refBoxes), len(predBoxes), "!!!!")
+    # print(tp, fp, fn, len(refBoxes), len(predBoxes), "!!!!")
     return [tp, fp, fn, th, th_i]
-
-
-def calTpFpFn_IvanVersion(work_data):
-    th_i, th, converter, numpy_masks, refBoxes = work_data
-
-    converter.detection_pixel_threshold = 0.5 # фиксируем так как варироваться будет iou
-    detected_objects = converter.postprocess_target_map(1 - numpy_masks)
-    predBoxes = []
-
-    for i, detected_objects_i in enumerate(detected_objects):
-        for obj in detected_objects_i:
-            box = []
-            for val in obj.location:
-                box.append((int(val[0]), int(val[1])))
-            predBoxes.append(box)
-
-    calc = FtMetricsCalculator(refBoxes, predBoxes)
-    metrics = calc.analyze(th)
-
-    tp, fp, fn = metrics.tp, metrics.fp, metrics.fn
-    #print(tp, fp, fn, len(refBoxes), len(predBoxes), "!!!!")
-    return [tp, fp, fn, th, th_i]
-
 
 
 def pool_handler(work, plot_data):
@@ -148,72 +125,114 @@ def pool_handler(work, plot_data):
         plot_data[th_i, 1] += fp
         plot_data[th_i, 2] += fn
         plot_data[th_i, 3] = th
-    #print(plot_data)
+    # print(plot_data)
+
+
+paths = ["/home/artem/PycharmProjects/backboned-unet-new/ckp/OrigDataset/PatternsMulticlass+focal"]
+
+save_cfg = cfg.CLASSES_NAME
 
 if __name__ == '__main__':
-    for network_id in range(0, 9):
-        path = f"/home/artem/PycharmProjects/backboned-unet-new/ckp/UnetCenterNet+TrainingSim-ly/{str(network_id)}.pth"
-        print(path)
-        ckp = torch.load(path)
-        model = Unet(backbone_name=cfg.slug, classes=cfg.num_classes, encoder_freeze=cfg.freeze_backbone)
+    for base_model_path in paths:
+        model_name = base_model_path.split("/")[-1]
 
-        model.load_state_dict(ckp['model'])
-        model = model.eval()
+        if base_model_path == "models/PatternsModels+FocalLoss" or "models/PatternsModels+FocalLoss+200":
+            print("use!!!!")
+            cfg.CLASSES_NAME = ('Empty', 'EAN', 'QRCode', 'Postnet',
+                                'DataMatrix', 'PDF417', 'Aztec',
+                                '{"barcode":"ean_pattern"}',
+                                '{"barcode":"qr_pattern"}',
+                                '{"barcode":"aztec_pattern"}',
+                                '{"barcode":"pdf417_pattern"}',
+                                '{"barcode":"post_pattern"}',
+                                '{"barcode":"datamatrix_pattern"}')
+            cfg.num_classes = len(cfg.CLASSES_NAME)
+        else:
+            cfg.CLASSES_NAME = save_cfg
+            cfg.num_classes = len(cfg.CLASSES_NAME)
 
-        if cfg.gpu:
-            model = model.cuda()
+        for network_id in range(0, 5):
+            path = base_model_path + f"/{str(network_id)}.pth"
+            print(path)
+            ckp = torch.load(path)
+            model = Unet(backbone_name=cfg.slug, classes=cfg.num_classes, encoder_freeze=cfg.freeze_backbone)
 
-        num_statistic = 4
-        num_th = 8
-        plot_data = np.zeros((num_th, num_statistic))
+            model.load_state_dict(ckp['model'])
+            model = model.eval()
 
-        work_data = []
-        for th_i in range(num_th):
-            if th_i == 0:
-                th = 0.5
-                min_bound = 0
-                max_bound = 1
-            else:
-                tp = plot_data[th_i - 1][0]
-                fp = plot_data[th_i - 1][1]
-                print(tp, fp)
-                prec = tp / (tp + fp)
-                print("prec", prec, th)
-                if prec > 0.8:
-                    max_bound = th
-                    th = th - (abs(max_bound - min_bound) / 2)
+            if cfg.gpu:
+                model = model.cuda()
+
+            num_statistic = 4
+            num_th = 20
+            plot_data = np.zeros((num_th, num_statistic))
+
+            work_data = []
+            stop_flag = 0
+            for th_i in range(num_th):
+                if th_i == 0:
+                    th = 0.5
+                    min_bound = 0
+                    max_bound = 1
                 else:
-                    min_bound = th
-                    th = th + (abs(max_bound - min_bound) / 2)
+                    tp = plot_data[th_i - 1][0]
+                    fp = plot_data[th_i - 1][1]
+                    print(tp, fp)
+                    prec = tp / (tp + fp)
+                    print("prec", prec, th)
+                    if prec > 0.8:
+                        max_bound = th
+                        th = th - (abs(max_bound - min_bound) / 2)
+                    else:
+                        min_bound = th
+                        th = th + (abs(max_bound - min_bound) / 2)
 
-            for num, data in tqdm.tqdm(enumerate(dl)):
-                inputs, refBoxes = prepareBoxes(data)
+                    if abs(prec - 0.8) < 0.01:
+                        stop_flag = stop_flag + 1
+                        if stop_flag == 2:
+                            print(stop_flag, "times ~0.8 stoping!")
+                            break
 
-                width, height = inputs.shape[2], inputs.shape[3]
-                refMask = Image.new('L', (width, height), 0)
+                for num, data in tqdm.tqdm(enumerate(dl)):
+                    inputs, refBoxes = prepareBoxes(data)
 
-                for polygon in refBoxes:
-                    ImageDraw.Draw(refMask).polygon(polygon, outline=0, fill=1)
+                    width, height = inputs.shape[2], inputs.shape[3]
+                    refMask = Image.new('L', (width, height), 0)
 
-                refMask = np.array(refMask)
+                    for polygon in refBoxes:
+                        ImageDraw.Draw(refMask).polygon(polygon, outline=0, fill=1)
 
-                masks, _ = model(inputs.cuda())
-                pred_map = torch.sigmoid(masks)
+                    refMask = np.array(refMask)
 
-                numpy_masks = pred_map.detach().cpu().numpy()
-                work_data.append([th_i, th, refMask, numpy_masks])
+                    masks, _ = model(inputs.cuda())
+                    pred_map = torch.sigmoid(masks)
 
-                if num % 500 == 0:
+                    # for i, mask in enumerate(pred_map[0]):
+                    #     cv2.imshow(cfg.CLASSES_NAME[i] + "_", mask.detach().cpu().numpy() * 1.)
+                    #     cv2.waitKey()
+
+                    numpy_masks = np.max(pred_map[:, 1:].detach().cpu().numpy(), axis=1)[np.newaxis]
+
+                    work_data.append([th_i, th, refMask, numpy_masks])
+
+                    if num % 500 == 0:
+                        pool_handler(work_data, plot_data)  # instantiating without any argument
+                        work_data = []
+
+                if len(work_data) != 0:
                     pool_handler(work_data, plot_data)  # instantiating without any argument
                     work_data = []
-            if len(work_data) != 0:
-                pool_handler(work_data, plot_data)  # instantiating without any argument
-                work_data = []
 
-        b = fbeta
-        print(plot_data[:, 0], plot_data[:, 1], plot_data[:, 2], th)
+            b = fbeta
+            print(plot_data[:, 0], plot_data[:, 1], plot_data[:, 2], th)
 
-        plot_data = np.array(plot_data)
+            plot_data = np.array(plot_data)
 
-        base = "/home/artem/PycharmProjects/backboned-unet-new"
-        np.save(base + f"/plots/{str(network_id)}.npy", plot_data)
+            base = "plots/full_dataset/" + model_name
+
+            try:
+                os.mkdir(base)
+            except OSError as error:
+                print(error)
+
+            np.save(base + f"/{str(network_id)}.npy", plot_data)
