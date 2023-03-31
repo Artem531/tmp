@@ -2,7 +2,7 @@ from convert.converter import Converter
 from convert.data.data_info import TargetMapInfo
 
 import cv2
-from dataset.barcode import BCDatasetValidSyntetic
+from dataset.barcode import BCDatasetValidSyntetic, BCDatasetValid
 from torch.utils.data import DataLoader
 from backboned_unet import Unet
 import torch
@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw
 import os
 from multiprocessing import get_context
 
-class_config_path = "/home/artem/PycharmProjects/backboned-unet-master/base.yml"
+class_config_path = "base.yml"
 with open(class_config_path, "r") as fin:
     class_config = load_ordered_yaml(fin)
 
@@ -31,12 +31,11 @@ target_map_info = TargetMapInfo(class_config)
 fbeta = 1
 
 mode = "eval"
-ds = BCDatasetValidSyntetic('/media/artem/A2F4DEB0F4DE85C7/myData/datasets/barcodes/ZVZ-synth-512/', resize_size=(512, 512),
+ds = BCDatasetValid('ZVZ-real-512_orig/', resize_size=(512, 512),
                     mode=mode, classes_name=cfg.CLASSES_NAME)
 dl = DataLoader(ds, batch_size=1, collate_fn=ds.collate_fn)
-#print(len(dl))
+# print(len(dl))
 plot_data = []
-
 
 
 def show_img(img, boxes, clses, scores):
@@ -128,7 +127,16 @@ def pool_handler(work, plot_data):
     # print(plot_data)
 
 
-paths = ["/home/artem/PycharmProjects/backboned-unet-new/ckp/OrigDataset/PatternsMulticlass+focal"]
+paths = ["models/centerNetPretrain",
+         "models/f1+100",
+         "models/f1+v1+100",
+         "models/f5+100",
+         "models/newFeaturesPretrain",
+         "models/original+focal+100",
+         "models/original+focal+200",
+         "models/PatternsModels+FocalLoss",
+         "models/PatternsFocalLoss+200",
+         "models/PatternsMulticlass+focal"]
 
 save_cfg = cfg.CLASSES_NAME
 
@@ -136,7 +144,7 @@ if __name__ == '__main__':
     for base_model_path in paths:
         model_name = base_model_path.split("/")[-1]
 
-        if base_model_path == "models/PatternsModels+FocalLoss" or "models/PatternsModels+FocalLoss+200":
+        if base_model_path == "models/PatternsModels+FocalLoss" or base_model_path == "models/PatternsFocalLoss+200" or base_model_path == "models/PatternsMulticlass+focal":
             print("use!!!!")
             cfg.CLASSES_NAME = ('Empty', 'EAN', 'QRCode', 'Postnet',
                                 'DataMatrix', 'PDF417', 'Aztec',
@@ -215,7 +223,7 @@ if __name__ == '__main__':
 
                     work_data.append([th_i, th, refMask, numpy_masks])
 
-                    if num % 500 == 0:
+                    if num % 3000 == 0:
                         pool_handler(work_data, plot_data)  # instantiating without any argument
                         work_data = []
 

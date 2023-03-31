@@ -53,7 +53,7 @@ class BCDataset(Dataset):
         self.ipath = ipath
         try:
             img = Image.open(ipath).convert('RGB')
-        except:
+        except Exception as e:
             print(ipath)
             return self.__getitem__(random.choice(range(len(self.samples))))
 
@@ -251,13 +251,21 @@ class BCDatasetPatterns(BCDataset):
 
         classes = np.array(classes)
 
-        full_mask = np.zeros((len(self.category2id), height, width))
+        mask = Image.new('L', (width, height), 0)
         for polygon, class_label in zip(polygons, classes):
-            mask = Image.new('L', (width, height), 0)
-            ImageDraw.Draw(mask).polygon(polygon, outline=0, fill=1)
-            full_mask[class_label] += mask
+            ImageDraw.Draw(mask).polygon(polygon, outline=0, fill=int(class_label))
 
-        mask = np.array(full_mask)
+        # for polygon, class_label in zip(polygons, classes):
+        #     mask = Image.new('L', (width, height), 0)
+        #     ImageDraw.Draw(mask).polygon(polygon, outline=0, fill=1)
+        #     full_mask[class_label] += mask
+
+        mask = np.array(mask)
+
+        #for i, mask_i in enumerate(mask):
+        #    cv2.imshow(f"_{i}", mask_i * 1.)
+        #    cv2.waitKey()
+
         #w, h = self.resize_size
         #mask = cv2.resize(mask, (w, h))
 

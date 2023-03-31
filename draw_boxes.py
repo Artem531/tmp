@@ -14,7 +14,7 @@ from torchvision import transforms
 from catalyst.utils.config import _load_ordered_yaml as load_ordered_yaml
 from convert.utils import process_class_config
 
-path = "/media/artem/A2F4DEB0F4DE85C7/runs/presentation/original+200/0.pth"
+path = "/home/artem/PycharmProjects/backboned-unet-new/ckp/OrigDataset/PatternsMulticlass+focal/0.pth"
 ckp = torch.load(path)
 cfg = ckp['config']
 
@@ -26,7 +26,7 @@ model = model.eval()
 if cfg.gpu:
     model = model.cuda()
 
-path = "/media/artem/A2F4DEB0F4DE85C7/runs/presentation/f1+100+v1+pretrainCenterNet/0.pth"
+path = "/media/artem/A2F4DEB0F4DE85C7/runs/presentation/small_dataset/newFeaturesPretrain/0.pth"
 ckp = torch.load(path)
 cfg = ckp['config']
 
@@ -52,6 +52,17 @@ with open(class_config_path, "r") as fin:
 # set default values
 class_config = process_class_config(class_config["class_config"])
 target_map_info = TargetMapInfo(class_config)
+
+cfg.CLASSES_NAME = ('Empty', 'EAN', 'QRCode', 'Postnet',
+                                'DataMatrix', 'PDF417', 'Aztec',
+                                '{"barcode":"ean_pattern"}',
+                                '{"barcode":"qr_pattern"}',
+                                '{"barcode":"aztec_pattern"}',
+                                '{"barcode":"pdf417_pattern"}',
+                                '{"barcode":"post_pattern"}',
+                                '{"barcode":"datamatrix_pattern"}')
+cfg.num_classes = len(cfg.CLASSES_NAME)
+
 
 def show_img(img, boxes, clses, scores, name):
     boxes = np.array(boxes, np.int32)
@@ -87,12 +98,12 @@ def processModel(model1, inputs, detection_pixel_threshold, img_paded, name):
     masks, _ = model1(inputs)
     pred_map = torch.sigmoid(masks)
 
-    numpy_masks = pred_map.detach().cpu().numpy()
+    numpy_masks = np.max(pred_map[:, 1:].detach().cpu().numpy(), axis=1)[np.newaxis]
 
     converter = Converter(TargetMapInfo())
     converter.detection_pixel_threshold = detection_pixel_threshold
-    detected_objects = converter.postprocess_target_map(1 - numpy_masks)
-    print(np.max(1 - numpy_masks))
+    detected_objects = converter.postprocess_target_map(numpy_masks)
+    print(np.max(numpy_masks))
     print(detected_objects)
 
     barcodesBoxes = []
@@ -107,9 +118,42 @@ def processModel(model1, inputs, detection_pixel_threshold, img_paded, name):
         score.append(1)
 
     show_img( img_paded, barcodesBoxes, cls, score, name )
-    #for i, mask in enumerate(pred_map[0]):
-    #    cv2.imshow(cfg.CLASSES_NAME[i] + "_" + name, mask.detach().cpu().numpy() * 1.)
 
+    for i, mask in enumerate(pred_map[0]):
+        cv2.imshow(cfg.CLASSES_NAME[i] + "_", mask.detach().cpu().numpy() * 1.)
+        cv2.waitKey()
+
+    for i, mask in enumerate(numpy_masks[0]):
+        cv2.imshow(cfg.CLASSES_NAME[i] + "_" + name, mask * 1.)
+        cv2.waitKey()
+    cv2.destroyAllWindows()
+
+def processModel1(model1, inputs, detection_pixel_threshold, img_paded, name):
+    masks, _ = model1(inputs)
+    pred_map = torch.sigmoid(masks)
+
+    numpy_masks = 1 - pred_map[:, 0].detach().cpu().numpy()[np.newaxis]
+
+    converter = Converter(TargetMapInfo())
+    converter.detection_pixel_threshold = detection_pixel_threshold
+    detected_objects = converter.postprocess_target_map(numpy_masks)
+    print(np.max(numpy_masks))
+    print(detected_objects)
+
+    barcodesBoxes = []
+    cls = []
+    score = []
+    for obj in detected_objects[0]:
+        box = []
+        for val in obj.location:
+            box.append([ int(val[0]), int(val[1]) ])
+        barcodesBoxes.append(box)
+        cls.append(obj.class_name)
+        score.append(1)
+
+    show_img( img_paded, barcodesBoxes, cls, score, name )
+    for i, mask in enumerate(numpy_masks[0]):
+        cv2.imshow(cfg.CLASSES_NAME[i] + "_" + name, mask * 1.)
 
 
 for data in tqdm.tqdm(dl):
@@ -126,8 +170,8 @@ for data in tqdm.tqdm(dl):
     input = transforms.Normalize(std=cfg.std, mean=cfg.mean)(input)
     inputs = input.unsqueeze(0).cuda()
 
-    processModel(model_second, inputs, 0.000813850038109756, img_paded.copy(), "Dice")
-    processModel(model, inputs, 0.13827078683035715, img_paded.copy(), "original+200")
+    processModel(model, inputs, 0.13827078683035715, img_paded.copy(), "Dice")
+    #processModel(model, inputs, 0.13827078683035715, img_paded.copy(), "original+200")
 
 
 

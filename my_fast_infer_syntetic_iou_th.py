@@ -2,7 +2,7 @@ from convert.converter import Converter
 from convert.data.data_info import TargetMapInfo
 import os
 import cv2
-from dataset.barcode import BCDatasetValidSyntetic
+from dataset.barcode import BCDatasetValidSyntetic, BCDatasetValid
 from torch.utils.data import DataLoader
 from backboned_unet import Unet
 import torch
@@ -19,7 +19,7 @@ from multiprocessing import Pool
 
 from multiprocessing import get_context
 
-class_config_path = "/home/artem/PycharmProjects/backboned-unet-master/base.yml"
+class_config_path = "base.yml"
 with open(class_config_path, "r") as fin:
     class_config = load_ordered_yaml(fin)
 
@@ -30,7 +30,7 @@ target_map_info = TargetMapInfo(class_config)
 fbeta = 1
 
 mode = "eval"
-ds = BCDatasetValidSyntetic('/media/artem/A2F4DEB0F4DE85C7/myData/datasets/barcodes/ZVZ-synth-512/', resize_size=(512, 512),
+ds = BCDatasetValid('/media/artem/A2F4DEB0F4DE85C7/myData/datasets/barcodes/ZVZ-real-512_orig/', resize_size=(512, 512),
                     mode=mode, classes_name=cfg.CLASSES_NAME)
 dl = DataLoader(ds, batch_size=1, collate_fn=ds.collate_fn)
 
@@ -84,6 +84,7 @@ def preprocess_img(image, input_ksize, boxes=None):
 
 num = 0
 
+
 def prepareBoxes(data):
     img, refBoxes = data
     orig_refBoxes = list(refBoxes)[0]
@@ -99,17 +100,18 @@ def prepareBoxes(data):
     inputs = input.unsqueeze(0)
     return inputs.cuda(), orig_refBoxes
 
+
 def calTpFpFn(work_data):
     th_i, th, binary_th, converter, numpy_masks, refBoxes = work_data
-    #print(th_i)
+    # print(th_i)
     # print(plot_data)
     # print(np.sum(numpy_masks, axis=(0,1)).shape)
     # cv2.imshow("wtf", np.sum(numpy_masks, axis=(0,1)) / np.max(np.sum(numpy_masks, axis=(0,1))))
     # print(np.mean(numpy_masks))
     # cv2.waitKey(0)
-    #print(th_i)
+    # print(th_i)
 
-    converter.detection_pixel_threshold = binary_th # фиксируем так как варироваться будет iou
+    converter.detection_pixel_threshold = binary_th  # фиксируем так как варироваться будет iou
     detected_objects = converter.postprocess_target_map(numpy_masks)
     predBoxes = []
 
@@ -120,9 +122,10 @@ def calTpFpFn(work_data):
                 box.append((int(val[0]), int(val[1])))
             predBoxes.append(box)
 
-    tp, fp, fn = getTpFpFn(refBoxes, predBoxes, iou_th=th)
-    #print(tp, fp, fn, len(refBoxes), len(predBoxes), "!!!!")
+    tp, fp, fn = getTpFpFn(refBoxes, predBoxes, th)
+    # print(tp, fp, fn, len(refBoxes), len(predBoxes), "!!!!")
     return [tp, fp, fn, th, th_i]
+
 
 def pool_handler(work, plot_data):
     with get_context("spawn").Pool(7) as p:
@@ -135,7 +138,8 @@ def pool_handler(work, plot_data):
         plot_data[th_i, 1] += fp
         plot_data[th_i, 2] += fn
         plot_data[th_i, 3] = th
-    #print(plot_data)
+    # print(plot_data)
+
 
 #
 # th_s = [0.005784254807692308,
@@ -150,10 +154,13 @@ def pool_handler(work, plot_data):
 #         0.3752170138888889]
 #
 
-paths = ["/home/artem/PycharmProjects/backboned-unet-new/ckp/OrigDataset/PatternsMulticlass+focal"]
 
-base_path = "/home/artem/PycharmProjects/backboned-unet-new/plots/full_dataset/"
-plots_num = 8
+paths = [
+    "/home/artem/Downloads/models/original+focal+100"]
+
+base_path = "plots/full_dataset/"
+plots_num = 5
+
 
 def gather_data(path):
     global min_rec_infer
@@ -176,15 +183,34 @@ def gather_data(path):
 
     return np.mean(th_arr[(prec > lower_b) & (prec < upper_b)])
 
-base_th_path = "/home/artem/PycharmProjects/backboned-unet-new/plots/full_dataset/"
+
+base_th_path = "binary/"
+
+save_cfg = cfg.CLASSES_NAME
 
 if __name__ == '__main__':
     for configuration_id in range(len(paths)):
         base_path = paths[configuration_id]
         name = base_path.split("/")[-1]
 
-        for network_id in range(0, 9):
-            binary_th = gather_data(base_th_path + name + f"/{network_id}.npy")
+        if base_path == "models/PatternsModels+FocalLoss" or base_path == "models/PatternsModels+FocalLoss+200" or base_path == "models/PatternsMulticlass+focal":
+            print("use!!!!")
+            cfg.CLASSES_NAME = ('Empty', 'EAN', 'QRCode', 'Postnet',
+                                'DataMatrix', 'PDF417', 'Aztec',
+                                '{"barcode":"ean_pattern"}',
+                                '{"barcode":"qr_pattern"}',
+                                '{"barcode":"aztec_pattern"}',
+                                '{"barcode":"pdf417_pattern"}',
+                                '{"barcode":"post_pattern"}',
+                                '{"barcode":"datamatrix_pattern"}')
+            cfg.num_classes = len(cfg.CLASSES_NAME)
+        else:
+            cfg.CLASSES_NAME = ('Empty', 'EAN', 'QRCode', 'Postnet',
+                                'DataMatrix', 'PDF417', 'Aztec')
+            cfg.num_classes = len(cfg.CLASSES_NAME)
+
+        for network_id in range(0, 5):
+            binary_th = 0.5 # gather_data(base_th_path + name + f"/{network_id}.npy")
             print("use:", base_path, binary_th)
             path = base_path + f"/{str(network_id)}.pth"
             print(path)
@@ -209,15 +235,15 @@ if __name__ == '__main__':
 
                 numpy_masks = np.max(pred_map[:, 1:].detach().cpu().numpy(), axis=1)[np.newaxis]
 
-                for th_i, th in enumerate( np.linspace(0.0, 1, num_th) ):
+                for th_i, th in enumerate(np.linspace(0.0, 1, num_th)):
                     work_data.append([th_i, th, binary_th, Converter(TargetMapInfo()), numpy_masks, refBoxes])
 
                 if num % 400 == 0:
-                    pool_handler(work_data, plot_data)  # instantiating without any argument
+                    pool_handler(work_data, plot_data)
                     work_data = []
 
             if len(work_data) != 0:
-                pool_handler(work_data, plot_data)  # instantiating without any argument
+                pool_handler(work_data, plot_data)
                 work_data = []
 
             b = fbeta
@@ -225,7 +251,7 @@ if __name__ == '__main__':
 
             plot_data = np.array(plot_data)
 
-            base_save_path = "/home/artem/PycharmProjects/backboned-unet-new/plots/"
+            base_save_path = "plots/"
             name = base_path.split("/")[-1]
 
             try:

@@ -7,7 +7,7 @@ line_kwargs = {}#"drawstyle": "steps-post"
 
 fig, ax = plt.subplots()
 xlabel = "th"
-ylabel = "fbeta"
+ylabel = "f5"
 ax.set(xlabel=xlabel, ylabel=ylabel)
 
 line_array = []
@@ -27,7 +27,7 @@ def plot_data(ax_p, path, name):
 
 # Граница минимального рекол в результатаз инференса (ниже нее нет пресижин)
 min_rec_infer = 0
-beta = 5
+beta = 1
 def gather_data(path, fn_arr, th_arr):
     global min_rec_infer
     data_plot2 = np.load(path)
@@ -41,8 +41,8 @@ def gather_data(path, fn_arr, th_arr):
     fn_arr.append(tp / (tp + (fp + beta**2 * fn) / (beta**2 + 1) ))
     th_arr.append(th)
 
-base_path = "/home/artem/PycharmProjects/backboned-unet-new/plots/"
-plots_num = 8
+base_path = ""
+plots_num = 5
 def gather_th(path):
     prec, th = [], []
     for i in range(plots_num):
@@ -83,41 +83,56 @@ def plot_data(name, display_name):
 
     #plt.fill_between(th_mean, min_fn_line_bound, max_fn_line_bound, alpha=0.4)
 
-# name = "f1+100+pretrainCenterNet"
-# display_name = "f1+v2+100+pretrainCenterNet"
+
+name = "/home/artem/PycharmProjects/backboned-unet-new/plots/original+focal+100"
+display_name = "CenterNet"
+plot_data(name, display_name)
+#
+#
+# name = "real_data/iou/iou_real_infer/f1+100"
+# display_name = "Многоцелевой f1 loss 100 эпох"
 # plot_data(name, display_name)
+#
+# #
+# name = "real_data/iou/iou_real_infer/f1+v1+100"
+# display_name = "Dice loss/Не многоцелевой f1 loss"
+# plot_data(name, display_name)
+#
+#
+# name = "real_data/iou/iou_real_syn_infer/f5+100"
+# display_name = "Многоцелевой f5 loss 100 эпох"
+# plot_data(name, display_name)
+# #
 
-name = "f1+100+pretrainCenterNet"
-display_name = "f1+v2+100+pretrainCenterNet"
-plot_data(name, display_name)
-
-name = "f1+100+v1+pretrainCenterNet"
-display_name = "(Dice loss)f1+100+v1+pretrainCenterNet"
-plot_data(name, display_name)
-
-name = "f5+100inverse"
-display_name = "f5+v2+100inverse+pretrainCenterNet"
-plot_data(name, display_name)
-
-name = "f5+100true"
-display_name = "f5+v2+100true+pretrainCenterNet"
-plot_data(name, display_name)
-
-name = "focallloss+resnetNewFeatures"
-display_name = "focallloss+pretrainCenterNet+BarcodeFeatures"
-plot_data(name, display_name)
-
-name = "focalloss+resnetCenterNet"
-display_name = "focalloss+pretrainCenterNet"
-plot_data(name, display_name)
-
-name = "original+100"
-display_name = "focalloss+original+100"
-plot_data(name, display_name)
-
-name = "original+200"
-display_name = "focalloss+original+200"
-plot_data(name, display_name)
+# name = "real_data/iou/iou_real_syn_infer/newFeaturesPretrain"
+# display_name = "CenterNet + качественные признаки"
+# plot_data(name, display_name)
+#
+#
+# name = "real_data/iou/iou_real_syn_infer/original+focal+100"
+# display_name = "Focal loss 100 эпох"
+# plot_data(name, display_name)
+#
+#
+# name = "real_data/iou/iou_real_syn_infer/original+focal+200"
+# display_name = "Focal loss 200 эпох"
+# plot_data(name, display_name)
+#
+# #
+# name = "real_data/iou/iou_real_infer/PatternsModels+FocalLoss"
+# display_name = "Focal loss 100 эпох Multilable"
+# plot_data(name, display_name)
+#
+#
+# name = "real_data/iou/iou_real_infer/PatternsModels+FocalLoss+200"
+# display_name = "Focal loss 200 эпох Multilable"
+# plot_data(name, display_name)
+#
+#
+# name = "real_data/iou/iou_real_infer/PatternsMulticlass+focal"
+# display_name = "Focal loss 100 эпох Multiclass"
+# plot_data(name, display_name)
+#
 
 mean_fn = []
 

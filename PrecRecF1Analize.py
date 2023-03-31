@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from shapely.geometry import Polygon
 import torch
+from scipy.optimize import linear_sum_assignment
 
 def calcIoU(refBox, predBox):
     polygon1 = Polygon(refBox)
@@ -27,28 +28,30 @@ def getTpFpFnMasks(binary_ann, binary_pred):
 
     return tp, fp, fn
 
-def getTpFpFn(refBoxes, predBoxes, iou_th=0.5):
-    """
-    ref and pred boxes for 1 class
-    """
-    IoUMatrix = np.zeros((len(refBoxes), len(predBoxes)))
-    for i, refBox in enumerate(refBoxes):
-        for j, predBox in enumerate(predBoxes):
-            IoUMatrix[i, j] = calcIoU(refBox, predBox)
+def getTpFpFn(gt_boxes, pred_boxes, iou_threshold):
+    num_pred_boxes = len(pred_boxes)
+    num_gt_boxes = len(gt_boxes)
 
-    IoUMatrixBinary = IoUMatrix > iou_th
-    IoUMatrixBinary_sum = np.sum(IoUMatrixBinary, axis=1)
-    IoUMatrixBinary_sum_tp_mask = IoUMatrixBinary_sum >= 1
-
-    tp = np.sum(IoUMatrixBinary_sum_tp_mask)
-    fn = len(refBoxes) - tp
-    fp = len(predBoxes) - tp
-
-    # for i, predIoULine in enumerate(IoUMatrixBinary):
-    #     if any(predIoULine == 1):
-    #         tp += 1
-    #         fp += np.sum(predIoULine == 1) - 1
-    #     else:
-    #         fn += 1
+    iou_matrix = np.zeros((len(gt_boxes), len(pred_boxes)))
+    for i, refBox in enumerate(gt_boxes):
+        for j, predBox in enumerate(pred_boxes):
+            iou_matrix[i, j] = calcIoU(refBox, predBox)
+    #print(iou_matrix)
+    # Use the Hungarian algorithm to find the optimal set of matches
+    row_ind, col_ind = linear_sum_assignment(-iou_matrix)
+    #print(row_ind, col_ind)
+    # Count true positives, false positives, and false negatives
+    tp = 0
+    fp = 0
+    for i in range(num_pred_boxes):
+        if i in row_ind:
+            j = col_ind[np.where(row_ind == i)[0][0]]
+            if iou_matrix[i, j] >= iou_threshold:
+                tp += 1
+            else:
+                fp += 1
+        else:
+            fp += 1
+    fn = num_gt_boxes - tp
 
     return tp, fp, fn
